@@ -71,8 +71,35 @@ bool setupSdCard(uint8_t maxFiles) {
 #else
     // Not using InputHandler (SdCard on default &SPI bus)
     if (task) {
-        if (!SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, SPI, 4000000UL, "/sd", maxFiles)) result = false;
-        // Serial.println("Task not activated");
+        // Mirror the proven Porkchop SD init: a dedicated SPI instance pinned explicitly
+        // to the SD pins (SCK/MISO/MOSI/CS from config), CS held HIGH before touching the
+        // bus (prevents "Select Failed" on flaky/no-name cards), then retry at descending
+        // speeds. Fixes SD reads that fail on boards (e.g. Cardputer ADV) whose microSD
+        // shares the Display SPI bus and whose global SPI is not pre-wired to the SD pins.
+        bool sdOk = false;
+        const uint32_t sdSpeeds[] = {
+            25000000UL, 20000000UL, 10000000UL, 8000000UL, 4000000UL, 1000000UL, 250000UL
+        };
+        const int nSpeeds = sizeof(sdSpeeds) / sizeof(sdSpeeds[0]);
+        for (int i = 0; i < nSpeeds && !sdOk; i++) {
+            pinMode((int8_t)bruceConfigPins.SDCARD_bus.cs, OUTPUT);
+            digitalWrite((int8_t)bruceConfigPins.SDCARD_bus.cs, HIGH);
+            sdcardSPI.begin(
+                (int8_t)bruceConfigPins.SDCARD_bus.sck,
+                (int8_t)bruceConfigPins.SDCARD_bus.miso,
+                (int8_t)bruceConfigPins.SDCARD_bus.mosi,
+                (int8_t)bruceConfigPins.SDCARD_bus.cs
+            );
+            delay(20);
+            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdcardSPI, sdSpeeds[i], "/sd", maxFiles)) {
+                Serial.printf("[SD] mounted at %lu Hz\n", sdSpeeds[i]);
+                sdOk = true;
+            } else {
+                SD.end();
+                delay(50);
+            }
+        }
+        if (!sdOk) result = false;
     } else {
         // acquireSPIBus() never begin()s the display's bus (it's already running), so a non-null,
         // non-sdcardSPI result means these pins are physically the display's own bus. Reusing the
