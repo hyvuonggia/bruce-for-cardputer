@@ -23,6 +23,10 @@
 #include <esp_rom_crc.h>
 
 // SPIClass sdcardSPI;
+// Dedicated FSPI (SPI2) bus for the SD card. The Cardputer ADV display owns HSPI
+// (USE_HSPI_PORT=1), and SPIClass() defaults to HSPI -> using the default sdcardSPI would
+// collide with the display. FSPI is free and is what the working Porkchop firmware uses.
+SPIClass sdSpiFspi(FSPI);
 String fileToCopy;
 std::vector<FileList> fileList;
 
@@ -84,14 +88,14 @@ bool setupSdCard(uint8_t maxFiles) {
         for (int i = 0; i < nSpeeds && !sdOk; i++) {
             pinMode((int8_t)bruceConfigPins.SDCARD_bus.cs, OUTPUT);
             digitalWrite((int8_t)bruceConfigPins.SDCARD_bus.cs, HIGH);
-            sdcardSPI.begin(
+            sdSpiFspi.begin(
                 (int8_t)bruceConfigPins.SDCARD_bus.sck,
                 (int8_t)bruceConfigPins.SDCARD_bus.miso,
                 (int8_t)bruceConfigPins.SDCARD_bus.mosi,
                 (int8_t)bruceConfigPins.SDCARD_bus.cs
             );
             delay(20);
-            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdcardSPI, sdSpeeds[i], "/sd", maxFiles)) {
+            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdSpiFspi, sdSpeeds[i], "/sd", maxFiles)) {
                 Serial.printf("[SD] mounted at %lu Hz\n", sdSpeeds[i]);
                 sdOk = true;
             } else {
