@@ -131,7 +131,7 @@ bool setupSdCard(uint8_t maxFiles) {
             result = false;
             Serial.println("SDCard GLOBAL-SPI init failed");
         }
-
+    }
 #endif
 
     if (result == false) {
