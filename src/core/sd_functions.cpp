@@ -23,10 +23,6 @@
 #include <esp_rom_crc.h>
 
 // SPIClass sdcardSPI;
-// Dedicated FSPI (SPI2) bus for the SD card. The Cardputer ADV display owns HSPI
-// (USE_HSPI_PORT=1), and SPIClass() defaults to HSPI -> using the default sdcardSPI would
-// collide with the display. FSPI is free and is what the working Porkchop firmware uses.
-SPIClass sdSpiFspi(FSPI);
 String fileToCopy;
 std::vector<FileList> fileList;
 
@@ -75,7 +71,7 @@ bool setupSdCard(uint8_t maxFiles) {
 #else
     // Not using InputHandler (SdCard on default &SPI bus)
     if (task) {
-        // Mirror the proven Porkchop SD init: a dedicated SPI instance pinned explicitly
+        // Mirror the proven Evil-Cardputer SD init (reads this card reliably): use the GLOBAL
         // to the SD pins (SCK/MISO/MOSI/CS from config), CS held HIGH before touching the
         // bus (prevents "Select Failed" on flaky/no-name cards), then retry at descending
         // speeds. Fixes SD reads that fail on boards (e.g. Cardputer ADV) whose microSD
@@ -88,14 +84,14 @@ bool setupSdCard(uint8_t maxFiles) {
         for (int i = 0; i < nSpeeds && !sdOk; i++) {
             pinMode((int8_t)bruceConfigPins.SDCARD_bus.cs, OUTPUT);
             digitalWrite((int8_t)bruceConfigPins.SDCARD_bus.cs, HIGH);
-            sdSpiFspi.begin(
+            SPI.begin(
                 (int8_t)bruceConfigPins.SDCARD_bus.sck,
                 (int8_t)bruceConfigPins.SDCARD_bus.miso,
                 (int8_t)bruceConfigPins.SDCARD_bus.mosi,
-                (int8_t)bruceConfigPins.SDCARD_bus.cs
+                -1
             );
             delay(20);
-            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdSpiFspi, sdSpeeds[i], "/sd", maxFiles)) {
+            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, SPI, sdSpeeds[i], "/sd", maxFiles)) {
                 Serial.printf("[SD] mounted at %lu Hz\n", sdSpeeds[i]);
                 sdOk = true;
             } else {
