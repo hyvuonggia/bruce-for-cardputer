@@ -26,7 +26,14 @@ StartupApp startupApp;
 String startupAppJSInterpreterFile = "";
 
 MainMenu mainMenu;
+#ifdef USE_HSPI_PORT
+// Display owns HSPI (TFT_eSPI with USE_HSPI_PORT). A bare SPIClass sdcardSPI; would
+// default to HSPI and collide with the display bus (Cardputer ADV SD fails to mount
+// while icon shows at boot). Use FSPI (SPI2) like the working Evil-Cardputer / Porkchop.
+SPIClass sdcardSPI(FSPI);
+#else
 SPIClass sdcardSPI;
+#endif
 #ifdef USE_HSPI_PORT
 #ifndef VSPI
 #define VSPI FSPI

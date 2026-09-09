@@ -71,44 +71,65 @@ bool setupSdCard(uint8_t maxFiles) {
 #else
     // Not using InputHandler (SdCard on default &SPI bus)
     if (task) {
-        if (!SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, SPI, 4000000UL, "/sd", maxFiles)) result = false;
-        // Serial.println("Task not activated");
-    } else {
-        // acquireSPIBus() never begin()s the display's bus (it's already running), so a non-null,
-        // non-sdcardSPI result means these pins are physically the display's own bus. Reusing the
-        // pointer it returns (instead of calling tft.getSPIinstance() here) also keeps this file
-        // buildable on boards with a non-SPI (e.g. parallel) display, where that accessor doesn't
-        // exist at all.
-        SPIClass *bus = acquireSPIBus(
-            bruceConfigPins.SDCARD_bus.sck, bruceConfigPins.SDCARD_bus.miso, bruceConfigPins.SDCARD_bus.mosi
-        );
-        if (bus != nullptr && bus != &sdcardSPI) {
-            Serial.println("SDCard in the same Bus as TFT, using TFT SPI instance");
-            if (!SD.begin(bruceConfigPins.SDCARD_bus.cs, *bus, 4000000UL, "/sd", maxFiles)) {
-                result = false;
-                Serial.println("SDCard in the same Bus as TFT, but failed to mount");
-            }
-        } else {
-            // SDCard on a dedicated bus: it's the anchor/owner of sdcardSPI, so start it here.
-            if (!sdcardSPI.begin(
-                    (int8_t)bruceConfigPins.SDCARD_bus.sck,
-                    (int8_t)bruceConfigPins.SDCARD_bus.miso,
-                    (int8_t)bruceConfigPins.SDCARD_bus.mosi,
-                    (int8_t)bruceConfigPins.SDCARD_bus.cs
-                )) {
-                Serial.println("Failed starting SPI Bus");
-            } // start SPI communications
+        // Mirror the proven Evil-Cardputer SD init (reads this card reliably): use the GLOBAL
+        // to the SD pins (SCK/MISO/MOSI/CS from config), CS held HIGH before touching the
+        // bus (prevents "Select Failed" on flaky/no-name cards), then retry at descending
+        // speeds. Fixes SD reads that fail on boards (e.g. Cardputer ADV) whose microSD
+        // shares the Display SPI bus and whose global SPI is not pre-wired to the SD pins.
+        bool sdOk = false;
+        const uint32_t sdSpeeds[] = {
+            25000000UL, 20000000UL, 10000000UL, 8000000UL, 4000000UL, 1000000UL, 250000UL
+        };
+        const int nSpeeds = sizeof(sdSpeeds) / sizeof(sdSpeeds[0]);
+        for (int i = 0; i < nSpeeds && !sdOk; i++) {
+            pinMode((int8_t)bruceConfigPins.SDCARD_bus.cs, OUTPUT);
+            digitalWrite((int8_t)bruceConfigPins.SDCARD_bus.cs, HIGH);
+            SPI.begin(
+                (int8_t)bruceConfigPins.SDCARD_bus.sck,
+                (int8_t)bruceConfigPins.SDCARD_bus.miso,
+                (int8_t)bruceConfigPins.SDCARD_bus.mosi,
+                -1
+            );
             delay(20);
-            if (!SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, sdcardSPI, 4000000UL, "/sd", maxFiles)) {
-                result = false;
-                Serial.println("SDCard in a different Bus, sdcardSPI failed to mount");
-#if defined(ARDUINO_M5STICK_C_PLUS) || defined(ARDUINO_M5STICK_C_PLUS2)
-                // If using Shared SPI, do not stop the bus if SDCard is not present
-                // If using Legacy, release the pins from this SPI Bus
-                if (bruceConfigPins.SDCARD_bus.miso != bruceConfigPins.CC1101_bus.miso) sdcardSPI.end();
-#endif
+            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, SPI, sdSpeeds[i], "/sd", maxFiles)) {
+                Serial.printf("[SD] mounted at %lu Hz\n", sdSpeeds[i]);
+                sdOk = true;
+            } else {
+                SD.end();
+                delay(50);
             }
-            Serial.println("SDCard in a different Bus, using sdcardSPI instance");
+        }
+        if (!sdOk) result = false;
+    } else {
+        // Mirror the proven Evil-Cardputer init (reads this card reliably on Cardputer ADV):
+        // use the GLOBAL SPI bus with explicit SD pins and CS held HIGH, retrying descending
+        // speeds. On USE_HSPI_PORT boards the display owns HSPI, so global SPI (=FSPI) is free.
+        bool sdOk = false;
+        const uint32_t sdSpeeds[] = {
+            40000000UL, 25000000UL, 20000000UL, 10000000UL, 8000000UL, 4000000UL, 1000000UL, 250000UL
+        };
+        const int nSpeeds = sizeof(sdSpeeds) / sizeof(sdSpeeds[0]);
+        for (int i = 0; i < nSpeeds && !sdOk; i++) {
+            pinMode((int8_t)bruceConfigPins.SDCARD_bus.cs, OUTPUT);
+            digitalWrite((int8_t)bruceConfigPins.SDCARD_bus.cs, HIGH);
+            SPI.begin(
+                (int8_t)bruceConfigPins.SDCARD_bus.sck,
+                (int8_t)bruceConfigPins.SDCARD_bus.miso,
+                (int8_t)bruceConfigPins.SDCARD_bus.mosi,
+                -1
+            );
+            delay(20);
+            if (SD.begin((int8_t)bruceConfigPins.SDCARD_bus.cs, SPI, sdSpeeds[i], "/sd", maxFiles)) {
+                Serial.printf("[SD] mounted at %lu Hz via GLOBAL SPI\n", sdSpeeds[i]);
+                sdOk = true;
+            } else {
+                SD.end();
+                delay(50);
+            }
+        }
+        if (!sdOk) {
+            result = false;
+            Serial.println("SDCard GLOBAL-SPI init failed");
         }
     }
 #endif
